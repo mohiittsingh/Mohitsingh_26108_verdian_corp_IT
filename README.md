@@ -1,56 +1,140 @@
 # Veridian Corp Autonomous IT Agent
 
-Hey! Welcome to my IT Service Desk Agent project for Veridian Corp. 
+An intelligent, AI-powered IT Service Desk Agent designed for Veridian Corp. This system automates the triage, classification, and resolution of unstructured employee IT requests by evaluating them against a corporate Knowledge Base (KB).
 
-The goal of this project was to build an intelligent, autonomous agent that can read unstructured employee requests (like "my laptop screen is flickering" or "I need guest wifi"), check those requests against our company's Knowledge Base policies, and figure out the next best action without human intervention.
+---
 
-## 🏗️ Architecture & Workflow
+## 🏛️ High-Level Architecture
 
-I wanted the system to feel like a real IT dashboard but with an AI brain operating behind the scenes. Here is how the logic flows:
+The system is built on a decoupled architecture, separating the client-side dashboard from the intelligent decision-making backend.
 
-1. **The Ingestion Layer:** The system tracks incoming Employee Requests. These start in a "Not started" state.
-2. **The Autonomous Agent:** When triggered, the backend fetches a batch of open requests and passes them to the LLM (Gemini).
-3. **Policy Evaluation:** The agent doesn't just guess. It strictly compares the request against a seeded database of Veridian Corp IT policies.
-4. **Decision Engine:** The AI decides between three core actions:
-   - **RESOLVE:** For simple things (like Guest Wi-Fi) that require no IT action.
-   - **ESCALATE:** For hardware replacements, security threats, or things requiring manager approval.
-   - **FOLLOW UP:** When the user didn't provide enough info or just needs simple troubleshooting steps.
-5. **Audit Logging:** Every single decision the AI makes is permanently logged in the database with the exact Policy ID it used to make that decision. This ensures the AI is never a "black box".
+```mermaid
+graph TD
+    subgraph Frontend [React / Vite SPA]
+        UI[User Dashboard]
+        ReqTab[Requests & Tickets View]
+        Audit[Audit Logs]
+    end
 
-## 💻 Tech Stack & Why I Chose It
+    subgraph Backend [Node.js / Express]
+        API[RESTful API Routes]
+        Engine[Agent Decision Engine]
+    end
+    
+    subgraph Services [External Services]
+        LLM[Google Gemini API]
+        DB[(MongoDB)]
+    end
 
-I wanted to keep the stack modern, fast, and unified.
+    UI -->|HTTP POST| API
+    ReqTab -->|HTTP GET| API
+    Audit -->|HTTP GET| API
+    
+    API <--> Engine
+    Engine <-->|Context & Policies| DB
+    Engine <-->|Prompt & JSON Response| LLM
+```
+
+---
+
+## 🔄 Request Processing Workflow
+
+When the system processes the backlog of employee requests, it follows a strict sequence to ensure accuracy, safety, and traceability.
+
+```mermaid
+sequenceDiagram
+    participant User as IT Admin
+    participant Server as Node.js Backend
+    participant DB as MongoDB
+    participant AI as Gemini LLM
+
+    User->>Server: Click "Run Agent on Backlog"
+    Server->>DB: Fetch open requests (Status: Not started)
+    DB-->>Server: Return batch of requests
+    
+    loop For each request
+        Server->>DB: Fetch Knowledge Base policies
+        DB-->>Server: Return relevant policies
+        
+        Server->>AI: Send prompt (Request Data + KB Policies)
+        Note over AI: Analyzes intent<br/>Checks constraints<br/>Formulates decision
+        AI-->>Server: Return structured JSON decision
+        
+        alt Decision == RESOLVE
+            Server->>Server: Update status to "Resolved"
+        else Decision == ESCALATE
+            Server->>Server: Update status to "Escalated"
+        else Decision == FOLLOW_UP
+            Server->>Server: Request more info / Manager Approval
+        end
+        
+        Server->>DB: Save updated Request state
+        Server->>DB: Write permanent Audit Log
+    end
+    
+    Server-->>User: Return Success (UI updates)
+```
+
+---
+
+## 🧠 The AI Decision Engine
+
+The core of the system is the autonomous AI agent. It acts as a rigid, policy-driven classifier rather than an open-ended chatbot. It is explicitly instructed to never hallucinate policies and to always base decisions strictly on the provided KB.
+
+```mermaid
+flowchart TD
+    Start([Incoming Request]) --> Extract[Extract Intent & Entities]
+    Extract --> Match[Retrieve Relevant KB Policies]
+    Match --> Evaluate{Does request violate policy?}
+    
+    Evaluate -->|Yes| Reject[Action: REJECT / ESCALATE]
+    Evaluate -->|No| CheckAction{Does it require IT action?}
+    
+    CheckAction -->|No| Resolve[Action: AUTO-RESOLVE]
+    CheckAction -->|Yes| Escalate[Action: ESCALATE TO HUMAN]
+    
+    Reject --> Log
+    Resolve --> Log
+    Escalate --> Log
+    
+    Log[(Write to Audit Log)] --> End([Process Complete])
+```
+
+---
+
+## 💻 Technology Stack & Rationale
 
 * **Frontend: React + Vite** 
-  * *Why?* I wanted a clean, snappy Single Page Application. Vite is incredibly fast for development, and React allowed me to build modular components (like the Dashboard, Requests table, and Audit Logs) without writing spaghetti code. I styled it with plain CSS and variables to easily support features like Dark Mode.
+  * *Rationale:* Provides a highly responsive Single Page Application (SPA). Vite offers exceptional development speed. The UI is built with modular components (Dashboards, Tables, Audit Logs) and utilizes native CSS variables for seamless light/dark mode switching.
 * **Backend: Node.js & Express** 
-  * *Why?* Keeping the entire stack in JavaScript just makes sense. Express is lightweight and perfect for quickly standing up REST APIs to handle the agent processing logic and serve data to the frontend.
+  * *Rationale:* Maintaining a unified JavaScript stack across the frontend and backend reduces context switching. Express is lightweight and highly unopinionated, making it perfect for standing up rapid REST APIs that interface with the AI engine.
 * **Database: MongoDB (Mongoose)** 
-  * *Why?* IT requests and audit logs are inherently document-based. MongoDB gave me the flexibility to easily store unstructured text, nested entities, and ticket states without needing complex SQL joins.
-* **AI Engine: Google Gemini API (1.5 Flash)**
-  * *Why?* I needed a model that was extremely fast and cheap for batch processing. Gemini's structured JSON output mode made it super easy to force the LLM to return exactly the fields my backend needed (Decision, Reasoning, Target Status) without failing.
+  * *Rationale:* IT requests, chat history, and audit logs are inherently document-based and unstructured. A NoSQL database like MongoDB allows for flexible schema design, enabling us to easily store nested AI entity extractions without complex SQL migrations.
+* **AI Engine: Google Gemini API**
+  * *Rationale:* Gemini is utilized for its exceptional speed and robust `responseMimeType: "application/json"` capability. This guarantees that the LLM returns perfectly structured JSON (Decision, Reasoning, Target Status) directly to the backend without parsing errors.
 
-## 🚀 How to Run It Locally
+---
 
-If you want to run this on your own machine, you'll need two terminal windows.
+## 🚀 Local Setup & Installation
 
-### 1. Database Setup
-First, make sure you have your MongoDB URI and Gemini API key ready.
-Go into both the `frontend` and `backend` folders and duplicate the `.envexmaple` files to `.env`, filling in your keys.
+To run this environment locally, you will need Node.js installed.
 
-### 2. Backend
+### 1. Environment Configuration
+Duplicate the `.envexmaple` file in both the `/frontend` and `/backend` directories. Rename them to `.env` and insert your MongoDB URI and Gemini API Key.
+
+### 2. Backend Initialization
 \`\`\`bash
 cd backend
 npm install
-npm run seed  # This will wipe and populate the DB with the initial test data
+npm run seed  # Wipes the DB and populates the initial Assignment 2 test data
 npm run dev
 \`\`\`
 
-### 3. Frontend
+### 3. Frontend Initialization
 \`\`\`bash
 cd frontend
 npm install
 npm run dev
 \`\`\`
 
-Open up `http://localhost:5173` and you're good to go!
+Navigate to `http://localhost:5173` to access the Veridian Corp IT Dashboard.
